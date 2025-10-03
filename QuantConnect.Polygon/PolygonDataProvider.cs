@@ -13,6 +13,7 @@
  * limitations under the License.
 */
 
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Newtonsoft.Json;
 using System.Net.NetworkInformation;
@@ -21,6 +22,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using NodaTime;
+using System.Globalization;
 using QuantConnect.Api;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
@@ -309,7 +311,7 @@ namespace QuantConnect.Lean.DataSource.Polygon
 
                     case "T":
                         var t = parsedMessage.ToObject<TradeMessage>()!;
-                        ProcessTrade(t.Symbol, Time.UnixMillisecondTimeStampToDateTime(t.Timestamp), t.Price, t.Size, GetExchangeCode(t.ExchangeID));
+                        ProcessTrade(t.Symbol, Time.UnixMillisecondTimeStampToDateTime(t.Timestamp), t.Price, t.Size, GetExchangeCode(t.ExchangeID), t.Conditions);
                         break;
 
                     case "Q":
@@ -356,16 +358,37 @@ namespace QuantConnect.Lean.DataSource.Polygon
         /// <param name="price">The trade price.</param>
         /// <param name="size">The traded quantity.</param>
         /// <param name="exchange">The exchange identifier where the trade occurred.</param>
-        private void ProcessTrade(string brokerageSymbol, DateTime timestamp, decimal price, decimal size = 0m, string exchange = "")
+        private void ProcessTrade(string brokerageSymbol, DateTime timestamp, decimal price, decimal size = 0m, string exchange = "", IReadOnlyList<long>? conditions = null)
         {
             var leanSymbol = _symbolMapper.GetLeanSymbol(brokerageSymbol);
             var time = GetTickTime(leanSymbol, timestamp);
-            // TODO: Map trade.Conditions to Lean sale conditions
-            var tick = new Tick(time, leanSymbol, string.Empty, exchange, size, price);
+            var saleCondition = BuildSaleCondition(conditions);
+            var tick = new Tick(time, leanSymbol, saleCondition, exchange, size, price);
+            if (!string.IsNullOrEmpty(saleCondition))
+            {
+                // Avoid parsing the sale condition string (which isn't hex encoded) inside Tick.ParsedSaleCondition
+                tick.ParsedSaleCondition = 0;
+            }
             lock (_dataAggregator)
             {
                 _dataAggregator.Update(tick);
             }
+        }
+
+        private static string BuildSaleCondition(IReadOnlyList<long>? conditions)
+        {
+            if (conditions == null || conditions.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var buffer = new List<string>(conditions.Count);
+            for (var i = 0; i < conditions.Count; i++)
+            {
+                buffer.Add(conditions[i].ToString(CultureInfo.InvariantCulture));
+            }
+
+            return string.Join(" ", buffer);
         }
 
         /// <summary>
