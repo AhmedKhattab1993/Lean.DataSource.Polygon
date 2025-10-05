@@ -602,6 +602,11 @@ namespace QuantConnect.Lean.DataSource.Polygon
         /// </summary>
         private static void ValidateSubscription()
         {
+            if (Config.GetBool("polygon-skip-license-validation", false))
+            {
+                Log.Trace("PolygonDataProvider.ValidateSubscription(): Skipping QuantConnect license validation check (polygon-skip-license-validation=true).");
+                return;
+            }
             try
             {
                 const int productId = 306;
