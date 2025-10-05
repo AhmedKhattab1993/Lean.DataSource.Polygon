@@ -55,6 +55,7 @@ namespace QuantConnect.Lean.DataSource.Polygon
         });
 
         private string _apiKey;
+        private bool _skipLicenseValidation = Config.GetBool("polygon-skip-license-validation", false);
 
         private PolygonAggregationManager _dataAggregator;
 
@@ -162,7 +163,14 @@ namespace QuantConnect.Lean.DataSource.Polygon
             RestApiClient = new PolygonRestApiClient(_apiKey);
             _optionChainProvider = new CachingOptionChainProvider(new PolygonOptionChainProvider(RestApiClient, _symbolMapper));
 
-            ValidateSubscription();
+            if (_skipLicenseValidation)
+            {
+                Log.Trace($"{nameof(PolygonDataProvider)}.{nameof(Initialize)}: Skipping license validation (polygon-skip-license-validation=true).");
+            }
+            else
+            {
+                ValidateSubscription();
+            }
 
             // Initialize the exchange mappings
             _exchangeMappings = FetchExchangeMappings();
@@ -209,6 +217,12 @@ namespace QuantConnect.Lean.DataSource.Polygon
                 !int.TryParse(maxSubscriptionsPerWebSocketStr, out var maxSubscriptionsPerWebSocket))
             {
                 maxSubscriptionsPerWebSocket = -1;
+            }
+
+            if (job.BrokerageData.TryGetValue("polygon-skip-license-validation", out var skipLicense)
+                && bool.TryParse(skipLicense, out var parsedSkip))
+            {
+                _skipLicenseValidation = parsedSkip;
             }
 
             Initialize(apiKey, maxSubscriptionsPerWebSocket, job.BrokerageData.TryGetValue("polygon-license-type", out var licenseType) ? licenseType : string.Empty);
