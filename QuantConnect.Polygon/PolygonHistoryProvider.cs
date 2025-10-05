@@ -13,6 +13,7 @@
  * limitations under the License.
 */
 
+using System.Linq;
 using NodaTime;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
@@ -260,10 +261,18 @@ namespace QuantConnect.Lean.DataSource.Polygon
                 ["order"] = "asc"
             };
 
-            foreach (var tick in RestApiClient.DownloadAndParseData<TResponse>(resource, parameters)
-                                             .SelectMany(response => response.Results))
+            var responses = RestApiClient.DownloadAndParseData<TResponse>(resource, parameters);
+            if (responses == null)
             {
-                var utcTime = Time.UnixNanosecondTimeStampToDateTime(tick.Timestamp);
+                yield break;
+            }
+
+            foreach (var tick in responses
+                .Where(response => response?.Results != null)
+                .SelectMany(response => response.Results!)
+                .Where(t => t != null))
+            {
+                var utcTime = Time.UnixNanosecondTimeStampToDateTime(tick!.Timestamp);
                 var time = GetTickTime(request.Symbol, utcTime);
                 yield return tickFactory(time, request.Symbol, tick);
             }
