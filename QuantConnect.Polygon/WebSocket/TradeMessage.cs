@@ -14,6 +14,7 @@
 */
 
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace QuantConnect.Lean.DataSource.Polygon
 {
@@ -45,5 +46,59 @@ namespace QuantConnect.Lean.DataSource.Polygon
         /// </summary>
         [JsonProperty("c")]
         public long[] Conditions { get; set; }
+
+        /// <summary>
+        /// The trade reporting facility identifier (if applicable)
+        /// </summary>
+        [JsonProperty("trfi")]
+        public long? TradeReportingFacilityId { get; set; }
+
+        /// <summary>
+        /// The trade reporting facility timestamp in milliseconds since Unix epoch (if applicable)
+        /// </summary>
+        [JsonProperty("trft")]
+        public long? TradeReportingFacilityTimestamp { get; set; }
+
+        /// <summary>
+        /// Correction code, when the trade is marked as a correction.
+        /// Polygon's websocket payloads currently emit this as the short-form field 'e';
+        /// older payloads may surface a 'correction' field instead, so we accept both.
+        /// </summary>
+        [JsonProperty("correction")]
+        public int? Correction { get; set; }
+
+        [JsonProperty("e")]
+        private JToken LegacyCorrection
+        {
+            set => Correction = ParseCorrection(value);
+        }
+
+        private static int? ParseCorrection(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                return null;
+            }
+
+            if (token.Type == JTokenType.Integer)
+            {
+                return token.Value<int>();
+            }
+
+            if (token.Type == JTokenType.String)
+            {
+                var text = token.Value<string>();
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return null;
+                }
+                if (int.TryParse(text, out var parsed))
+                {
+                    return parsed;
+                }
+            }
+
+            return null;
+        }
     }
 }

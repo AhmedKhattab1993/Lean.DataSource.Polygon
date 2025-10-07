@@ -208,24 +208,32 @@ namespace QuantConnect.Lean.DataSource.Polygon
                 return;
             }
 
-            if (!job.BrokerageData.TryGetValue("polygon-api-key", out var apiKey))
+            var brokerageData = job.GetType().GetProperty("BrokerageData")?.GetValue(job) as IDictionary<string, string>
+                ?? job.GetType().GetField("BrokerageData")?.GetValue(job) as IDictionary<string, string>;
+
+            if (brokerageData == null)
+            {
+                throw new ArgumentException("The Polygon.io brokerage data dictionary is missing from the live job packet.");
+            }
+
+            if (!brokerageData.TryGetValue("polygon-api-key", out var apiKey))
             {
                 throw new ArgumentException("The Polygon.io API key is missing from the brokerage data.");
             }
 
-            if (!job.BrokerageData.TryGetValue("polygon-max-subscriptions-per-websocket", out var maxSubscriptionsPerWebSocketStr) ||
+            if (!brokerageData.TryGetValue("polygon-max-subscriptions-per-websocket", out var maxSubscriptionsPerWebSocketStr) ||
                 !int.TryParse(maxSubscriptionsPerWebSocketStr, out var maxSubscriptionsPerWebSocket))
             {
                 maxSubscriptionsPerWebSocket = -1;
             }
 
-            if (job.BrokerageData.TryGetValue("polygon-skip-license-validation", out var skipLicense)
+            if (brokerageData.TryGetValue("polygon-skip-license-validation", out var skipLicense)
                 && bool.TryParse(skipLicense, out var parsedSkip))
             {
                 _skipLicenseValidation = parsedSkip;
             }
 
-            Initialize(apiKey, maxSubscriptionsPerWebSocket, job.BrokerageData.TryGetValue("polygon-license-type", out var licenseType) ? licenseType : string.Empty);
+            Initialize(apiKey, maxSubscriptionsPerWebSocket, brokerageData.TryGetValue("polygon-license-type", out var licenseType) ? licenseType : string.Empty);
         }
 
         /// <summary>
@@ -325,7 +333,16 @@ namespace QuantConnect.Lean.DataSource.Polygon
 
                     case "T":
                         var t = parsedMessage.ToObject<TradeMessage>()!;
-                        ProcessTrade(t.Symbol, Time.UnixMillisecondTimeStampToDateTime(t.Timestamp), t.Price, t.Size, GetExchangeCode(t.ExchangeID), t.Conditions);
+                        ProcessTrade(
+                            t.Symbol,
+                            Time.UnixMillisecondTimeStampToDateTime(t.Timestamp),
+                            t.Price,
+                            t.Size,
+                            GetExchangeCode(t.ExchangeID),
+                            t.Conditions,
+                            t.TradeReportingFacilityId,
+                            t.TradeReportingFacilityTimestamp,
+                            t.Correction);
                         break;
 
                     case "Q":
@@ -372,7 +389,16 @@ namespace QuantConnect.Lean.DataSource.Polygon
         /// <param name="price">The trade price.</param>
         /// <param name="size">The traded quantity.</param>
         /// <param name="exchange">The exchange identifier where the trade occurred.</param>
-        private void ProcessTrade(string brokerageSymbol, DateTime timestamp, decimal price, decimal size = 0m, string exchange = "", IReadOnlyList<long>? conditions = null)
+        private void ProcessTrade(
+            string brokerageSymbol,
+            DateTime timestamp,
+            decimal price,
+            decimal size = 0m,
+            string exchange = "",
+            IReadOnlyList<long>? conditions = null,
+            long? tradeReportingFacilityId = null,
+            long? tradeReportingFacilityTimestamp = null,
+            int? correction = null)
         {
             var leanSymbol = _symbolMapper.GetLeanSymbol(brokerageSymbol);
             var time = GetTickTime(leanSymbol, timestamp);
@@ -383,6 +409,22 @@ namespace QuantConnect.Lean.DataSource.Polygon
                 // Avoid parsing the sale condition string (which isn't hex encoded) inside Tick.ParsedSaleCondition
                 tick.ParsedSaleCondition = 0;
             }
+
+            if (tradeReportingFacilityId.HasValue)
+            {
+                tick.SetProperty("TrfId", tradeReportingFacilityId.Value);
+            }
+
+            if (tradeReportingFacilityTimestamp.HasValue)
+            {
+                tick.SetProperty("TrfTimestamp", tradeReportingFacilityTimestamp.Value);
+            }
+
+            if (correction.HasValue)
+            {
+                tick.SetProperty("Correction", correction.Value);
+            }
+
             lock (_dataAggregator)
             {
                 _dataAggregator.Update(tick);
